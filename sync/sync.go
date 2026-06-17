@@ -151,7 +151,43 @@ func (s *Syncer) SyncWorktree(repo github.Repository, branch string) error {
 		return fmt.Errorf("failed to create worktree: %w", err)
 	}
 
+	// Symlink IDE settings from main repo
+	s.symlinkIDESettings(mainRepoPath, worktreePath)
+
 	return nil
+}
+
+func (s *Syncer) symlinkIDESettings(mainRepoPath, worktreePath string) {
+	// Directories to symlink (IDE settings, virtual environments)
+	ideDirs := []string{".idea", ".vscode", ".venv"}
+
+	for _, dir := range ideDirs {
+		srcPath := filepath.Join(mainRepoPath, dir)
+		dstPath := filepath.Join(worktreePath, dir)
+
+		// Check if source exists in main repo
+		if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+			continue
+		}
+
+		// Check if destination already exists (don't overwrite)
+		if _, err := os.Stat(dstPath); err == nil {
+			continue
+		}
+
+		// Create relative symlink
+		relPath, err := filepath.Rel(worktreePath, srcPath)
+		if err != nil {
+			s.log("Warning: could not create relative path for %s: %v", dir, err)
+			continue
+		}
+
+		if err := os.Symlink(relPath, dstPath); err != nil {
+			s.log("Warning: could not symlink %s: %v", dir, err)
+		} else {
+			s.log("Symlinked %s from main repo", dir)
+		}
+	}
 }
 
 func (s *Syncer) updateWorktree(worktreePath, branch string) error {

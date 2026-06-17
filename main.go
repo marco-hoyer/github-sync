@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -84,7 +85,13 @@ into the local filesystem using git worktrees.`,
 		RunE:  runBranch,
 	}
 
-	rootCmd.AddCommand(syncCmd, listCmd, initCmd, branchCmd)
+	pushCmd := &cobra.Command{
+		Use:   "push",
+		Short: "Commit all changes and push to remote",
+		RunE:  runPush,
+	}
+
+	rootCmd.AddCommand(syncCmd, listCmd, initCmd, branchCmd, pushCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -220,26 +227,30 @@ func runSync(cmd *cobra.Command, args []string) error {
 						continue
 					}
 
-					if withBranches {
-						branches, err := job.client.ListBranches(job.repo.Owner, job.repo.Name)
-						if err != nil {
-							results <- syncResult{repo: repoName, err: fmt.Errorf("list branches failed: %w", err)}
-							continue
+					// Fetch remote branches for worktree sync and/or cleanup
+					branches, err := job.client.ListBranches(job.repo.Owner, job.repo.Name)
+					if err != nil {
+						if verbose {
+							fmt.Printf("Warning: could not list branches for %s: %v\n", repoName, err)
 						}
-
-						// Sync worktrees for each branch
+					} else {
 						var branchNames []string
 						for _, branch := range branches {
 							branchNames = append(branchNames, branch.Name)
-							if err := job.syncer.SyncWorktree(job.repo, branch.Name); err != nil {
-								// Log but don't fail the whole repo
-								if verbose {
-									fmt.Printf("Warning: worktree for %s branch %s: %v\n", repoName, branch.Name, err)
+						}
+
+						// Sync worktrees for each branch if requested
+						if withBranches {
+							for _, branch := range branches {
+								if err := job.syncer.SyncWorktree(job.repo, branch.Name); err != nil {
+									if verbose {
+										fmt.Printf("Warning: worktree for %s branch %s: %v\n", repoName, branch.Name, err)
+									}
 								}
 							}
 						}
 
-						// Cleanup stale worktrees for deleted branches
+						// Always cleanup stale worktrees for deleted branches
 						if err := job.syncer.CleanupStaleWorktrees(job.repo, branchNames); err != nil {
 							if verbose {
 								fmt.Printf("Warning: cleanup stale worktrees for %s: %v\n", repoName, err)
@@ -467,7 +478,7 @@ func runBranch(cmd *cobra.Command, args []string) error {
 	}
 
 	// Fetch to make sure we have the branch
-	fmt.Printf("Fetching latest changes...\n")
+	fmt.Fprintf(os.Stderr, "Fetching latest changes...\n")
 	fetchCmd := exec.Command("git", "fetch", "--all")
 	fetchCmd.Dir = cwd
 	if verbose {
@@ -478,11 +489,33 @@ func runBranch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to fetch: %w", err)
 	}
 
+	// Check if branch exists locally or remotely
+	branchExists := false
+	checkCmd := exec.Command("git", "rev-parse", "--verify", branchName)
+	checkCmd.Dir = cwd
+	if err := checkCmd.Run(); err == nil {
+		branchExists = true
+	} else {
+		// Check if it exists as a remote branch
+		checkRemoteCmd := exec.Command("git", "rev-parse", "--verify", "origin/"+branchName)
+		checkRemoteCmd.Dir = cwd
+		if err := checkRemoteCmd.Run(); err == nil {
+			branchExists = true
+		}
+	}
+
 	// Create the worktree
-	fmt.Printf("Creating worktree for branch '%s' at %s...\n", branchName, worktreePath)
+	fmt.Fprintf(os.Stderr, "Creating worktree for branch '%s' at %s...\n", branchName, worktreePath)
 
 	var stdout, stderr bytes.Buffer
-	gitCmd := exec.Command("git", "worktree", "add", worktreePath, branchName)
+	var gitCmd *exec.Cmd
+	if branchExists {
+		gitCmd = exec.Command("git", "worktree", "add", worktreePath, branchName)
+	} else {
+		// Branch doesn't exist, create it with -b
+		fmt.Fprintf(os.Stderr, "Branch '%s' does not exist, creating new branch...\n", branchName)
+		gitCmd = exec.Command("git", "worktree", "add", "-b", branchName, worktreePath)
+	}
 	gitCmd.Dir = cwd
 	if verbose {
 		gitCmd.Stdout = os.Stdout
@@ -503,8 +536,44 @@ func runBranch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create worktree: %w", err)
 	}
 
-	fmt.Printf("Worktree created at %s\n", worktreePath)
+	// Symlink IDE settings from main repo
+	symlinkIDESettings(cwd, worktreePath)
+
+	// Print only the path to stdout so it can be used with: cd $(github-sync branch X)
+	fmt.Println(worktreePath)
 	return nil
+}
+
+func symlinkIDESettings(mainRepoPath, worktreePath string) {
+	ideDirs := []string{".idea", ".vscode", ".venv"}
+
+	for _, dir := range ideDirs {
+		srcPath := filepath.Join(mainRepoPath, dir)
+		dstPath := filepath.Join(worktreePath, dir)
+
+		// Check if source exists in main repo
+		if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+			continue
+		}
+
+		// Check if destination already exists
+		if _, err := os.Stat(dstPath); err == nil {
+			continue
+		}
+
+		// Create relative symlink
+		relPath, err := filepath.Rel(worktreePath, srcPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not create relative path for %s: %v\n", dir, err)
+			continue
+		}
+
+		if err := os.Symlink(relPath, dstPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not symlink %s: %v\n", dir, err)
+		} else {
+			fmt.Fprintf(os.Stderr, "Symlinked %s from main repo\n", dir)
+		}
+	}
 }
 
 func sanitizeBranchName(branch string) string {
@@ -518,6 +587,143 @@ func sanitizeBranchName(branch string) string {
 		"<", "-",
 		">", "-",
 		"|", "-",
+	)
+	return replacer.Replace(branch)
+}
+
+func runPush(cmd *cobra.Command, args []string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	// Verify we're in a git repository
+	checkCmd := exec.Command("git", "rev-parse", "--git-dir")
+	checkCmd.Dir = cwd
+	if err := checkCmd.Run(); err != nil {
+		return fmt.Errorf("not in a git repository")
+	}
+
+	// Get current branch name
+	branchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branchCmd.Dir = cwd
+	branchOutput, err := branchCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+	branchName := strings.TrimSpace(string(branchOutput))
+
+	// Check if there are any changes to commit
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = cwd
+	statusOutput, err := statusCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get git status: %w", err)
+	}
+
+	if len(statusOutput) == 0 {
+		fmt.Println("No changes to commit.")
+		// Still try to push in case there are unpushed commits
+		fmt.Println("Pushing existing commits...")
+		pushCmd := exec.Command("git", "push", "-u", "origin", branchName)
+		pushCmd.Dir = cwd
+		pushCmd.Stdout = os.Stdout
+		pushCmd.Stderr = os.Stderr
+		if err := pushCmd.Run(); err != nil {
+			return fmt.Errorf("failed to push: %w", err)
+		}
+		fmt.Println("Done!")
+		return nil
+	}
+
+	// Show what will be committed
+	fmt.Println("Changes to be committed:")
+	fmt.Println(string(statusOutput))
+
+	// Create commit message template from branch name
+	messageTemplate := branchNameToCommitMessage(branchName)
+
+	// Ask user to refine the commit message
+	fmt.Printf("Commit message [%s]: ", messageTemplate)
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read input: %w", err)
+	}
+	input = strings.TrimSpace(input)
+
+	commitMessage := messageTemplate
+	if input != "" {
+		commitMessage = input
+	}
+
+	// Stage all changes
+	fmt.Println("Staging changes...")
+	addCmd := exec.Command("git", "add", "-A")
+	addCmd.Dir = cwd
+	if err := addCmd.Run(); err != nil {
+		return fmt.Errorf("failed to stage changes: %w", err)
+	}
+
+	// Commit
+	fmt.Println("Committing...")
+	gitCommitCmd := exec.Command("git", "commit", "-m", commitMessage)
+	gitCommitCmd.Dir = cwd
+	gitCommitCmd.Stdout = os.Stdout
+	gitCommitCmd.Stderr = os.Stderr
+	if err := gitCommitCmd.Run(); err != nil {
+		return fmt.Errorf("failed to commit: %w", err)
+	}
+
+	// Push
+	fmt.Println("Pushing...")
+	gitPushCmd := exec.Command("git", "push", "-u", "origin", branchName)
+	gitPushCmd.Dir = cwd
+	gitPushCmd.Stdout = os.Stdout
+	gitPushCmd.Stderr = os.Stderr
+	if err := gitPushCmd.Run(); err != nil {
+		return fmt.Errorf("failed to push: %w", err)
+	}
+
+	// Create PR if not on main/master branch
+	if branchName != "main" && branchName != "master" {
+		// Check if PR already exists for this branch
+		checkPRCmd := exec.Command("gh", "pr", "view", branchName)
+		checkPRCmd.Dir = cwd
+		if err := checkPRCmd.Run(); err == nil {
+			fmt.Println("PR already exists for this branch.")
+		} else {
+			fmt.Println("Creating pull request...")
+			prCmd := exec.Command("gh", "pr", "create", "--title", commitMessage, "--body", "")
+			prCmd.Dir = cwd
+			prCmd.Stdout = os.Stdout
+			prCmd.Stderr = os.Stderr
+			prCmd.Stdin = os.Stdin
+			if err := prCmd.Run(); err != nil {
+				fmt.Printf("Warning: failed to create PR: %v\n", err)
+				fmt.Println("You can create it manually with: gh pr create")
+			}
+		}
+	}
+
+	fmt.Println("Done!")
+	return nil
+}
+
+func branchNameToCommitMessage(branch string) string {
+	// Remove common prefixes
+	prefixes := []string{"feature/", "feat/", "bugfix/", "fix/", "hotfix/", "release/", "chore/"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(branch, prefix) {
+			branch = strings.TrimPrefix(branch, prefix)
+			break
+		}
+	}
+
+	// Replace separators with spaces
+	replacer := strings.NewReplacer(
+		"-", " ",
+		"_", " ",
 	)
 	return replacer.Replace(branch)
 }

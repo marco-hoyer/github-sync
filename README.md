@@ -125,14 +125,30 @@ Create a worktree for a specific branch while inside a repository:
 ```bash
 cd ~/github-repos/github/myorg/myrepo
 
-# Create worktree for a feature branch
+# Create worktree for an existing branch
 github-sync branch feature-auth
 # Creates: ~/github-repos/github/myorg/myrepo-feature-auth
 
-# Works with remote branches too
-github-sync branch origin/develop
-# Creates: ~/github-repos/github/myorg/myrepo-origin-develop
+# Create worktree for a new branch (auto-creates if it doesn't exist)
+github-sync branch my-new-feature
+# Creates: ~/github-repos/github/myorg/myrepo-my-new-feature
+
+# Create and cd into the new worktree in one command
+cd $(github-sync branch feature-auth)
 ```
+
+### Push Changes
+
+Commit all changes and push to remote. Uses the branch name as a commit message template and creates a PR for non-main branches:
+
+```bash
+github-sync push
+# 1. Shows affected files
+# 2. Prompts for commit message (branch name as default, e.g., "SRE 3674 docs")
+# 3. Commits, pushes, and creates PR (if not on main/master)
+```
+
+Requires `gh` CLI for PR creation.
 
 ### List Resources
 
@@ -162,6 +178,7 @@ Commands:
   init        Create example config file
   sync        Sync repositories from GitHub
   branch      Create a worktree for a branch in the current repo
+  push        Commit all changes and push to remote
   list        List instances, orgs, or repos
   completion  Generate shell autocompletion
   help        Help about any command
@@ -183,8 +200,9 @@ Sync Flags:
 1. **Initial clone**: Repositories are cloned to `<root>/<instance>/<org>/<repo>`
 2. **Updates**: Existing repos are fetched and fast-forward merged (if clean)
 3. **Worktrees**: With `--branches`, additional branches are added as git worktrees sharing the same object store
-4. **Cleanup**: Worktrees for deleted remote branches are automatically removed during sync
-5. **Safety**: Repos/worktrees with uncommitted changes are skipped to avoid data loss
+4. **Shared settings**: `.idea/`, `.vscode/`, and `.venv/` are automatically symlinked from the main repo to worktrees
+5. **Cleanup**: Worktrees for deleted remote branches are automatically removed during sync
+6. **Safety**: Repos/worktrees with uncommitted changes are skipped to avoid data loss
 
 ## Token Permissions
 
