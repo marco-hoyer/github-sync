@@ -11,6 +11,31 @@ import (
 	"github.com/marco-hoyer/github-sync/github"
 )
 
+// SyncAction represents what action was taken during sync
+type SyncAction int
+
+const (
+	ActionCloned SyncAction = iota
+	ActionUpdated
+	ActionUnchanged
+	ActionSkipped
+)
+
+func (a SyncAction) String() string {
+	switch a {
+	case ActionCloned:
+		return "cloned"
+	case ActionUpdated:
+		return "updated"
+	case ActionUnchanged:
+		return "unchanged"
+	case ActionSkipped:
+		return "skipped"
+	default:
+		return "unknown"
+	}
+}
+
 type Syncer struct {
 	rootDir       string
 	instanceAlias string
@@ -54,7 +79,7 @@ func (s *Syncer) runGit(args ...string) error {
 	return nil
 }
 
-func (s *Syncer) SyncRepository(repo github.Repository) error {
+func (s *Syncer) SyncRepository(repo github.Repository) (SyncAction, error) {
 	repoPath := filepath.Join(s.rootDir, s.instanceAlias, repo.Owner, repo.Name)
 	defaultBranch := repo.DefaultBranch
 	if defaultBranch == "" {
@@ -63,15 +88,19 @@ func (s *Syncer) SyncRepository(repo github.Repository) error {
 
 	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
 		if err := s.cloneRepo(repo, repoPath); err != nil {
-			return fmt.Errorf("failed to clone: %w", err)
+			return ActionSkipped, fmt.Errorf("failed to clone: %w", err)
 		}
-	} else {
-		if err := s.updateRepo(repoPath, defaultBranch); err != nil {
-			return fmt.Errorf("failed to update: %w", err)
-		}
+		return ActionCloned, nil
 	}
 
-	return nil
+	changed, err := s.updateRepo(repoPath, defaultBranch)
+	if err != nil {
+		return ActionSkipped, fmt.Errorf("failed to update: %w", err)
+	}
+	if changed {
+		return ActionUpdated, nil
+	}
+	return ActionUnchanged, nil
 }
 
 func (s *Syncer) cloneRepo(repo github.Repository, repoPath string) error {
@@ -85,18 +114,18 @@ func (s *Syncer) cloneRepo(repo github.Repository, repoPath string) error {
 	return s.runGit("clone", cloneURL, repoPath)
 }
 
-func (s *Syncer) updateRepo(repoPath, defaultBranch string) error {
+func (s *Syncer) updateRepo(repoPath, defaultBranch string) (bool, error) {
 	s.log("Updating %s...", repoPath)
 
 	// Fetch all updates
 	if err := s.runGit("-C", repoPath, "fetch", "--all", "--prune"); err != nil {
-		return fmt.Errorf("fetch failed: %w", err)
+		return false, fmt.Errorf("fetch failed: %w", err)
 	}
 
 	// Check if we're on the default branch and it's clean
 	currentBranch, err := s.getCurrentBranch(repoPath)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if currentBranch == defaultBranch {
@@ -104,20 +133,35 @@ func (s *Syncer) updateRepo(repoPath, defaultBranch string) error {
 		cmd := exec.Command("git", "-C", repoPath, "status", "--porcelain")
 		output, err := cmd.Output()
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		if len(output) == 0 {
+			// Get commit hash before pull
+			hashBefore, err := s.getCommitHash(repoPath)
+			if err != nil {
+				return false, err
+			}
+
 			// Clean working directory, safe to pull
 			if err := s.runGit("-C", repoPath, "pull", "--ff-only"); err != nil {
 				s.log("Warning: pull failed for %s: %v", repoPath, err)
+				return false, nil
 			}
+
+			// Get commit hash after pull
+			hashAfter, err := s.getCommitHash(repoPath)
+			if err != nil {
+				return false, err
+			}
+
+			return hashBefore != hashAfter, nil
 		} else {
 			s.log("Warning: %s has uncommitted changes, skipping pull", repoPath)
 		}
 	}
 
-	return nil
+	return false, nil
 }
 
 func (s *Syncer) SyncWorktree(repo github.Repository, branch string) error {
@@ -151,15 +195,15 @@ func (s *Syncer) SyncWorktree(repo github.Repository, branch string) error {
 		return fmt.Errorf("failed to create worktree: %w", err)
 	}
 
-	// Symlink IDE settings from main repo
-	s.symlinkIDESettings(mainRepoPath, worktreePath)
+	// Symlink shared folders from the main branch for consistency
+	s.symlinkSharedFiles(mainRepoPath, worktreePath)
 
 	return nil
 }
 
-func (s *Syncer) symlinkIDESettings(mainRepoPath, worktreePath string) {
-	// Directories to symlink (IDE settings, virtual environments)
-	ideDirs := []string{".idea", ".vscode", ".venv"}
+func (s *Syncer) symlinkSharedFiles(mainRepoPath, worktreePath string) {
+	// Files and directories to symlink (IDE settings, virtual environments)
+	ideDirs := []string{".idea", ".vscode", ".zed", ".venv", ".env"}
 
 	for _, dir := range ideDirs {
 		srcPath := filepath.Join(mainRepoPath, dir)
@@ -311,6 +355,15 @@ func (s *Syncer) CleanupStaleWorktrees(repo github.Repository, remoteBranches []
 
 func (s *Syncer) getCurrentBranch(repoPath string) (string, error) {
 	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func (s *Syncer) getCommitHash(repoPath string) (string, error) {
+	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "HEAD")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err

@@ -109,8 +109,9 @@ type syncJob struct {
 }
 
 type syncResult struct {
-	repo string
-	err  error
+	repo   string
+	action gsync.SyncAction
+	err    error
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
@@ -222,8 +223,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 				for job := range jobs {
 					repoName := fmt.Sprintf("%s/%s", job.repo.Owner, job.repo.Name)
 
-					if err := job.syncer.SyncRepository(job.repo); err != nil {
-						results <- syncResult{repo: repoName, err: fmt.Errorf("sync failed: %w", err)}
+					action, err := job.syncer.SyncRepository(job.repo)
+					if err != nil {
+						results <- syncResult{repo: repoName, action: action, err: fmt.Errorf("sync failed: %w", err)}
 						continue
 					}
 
@@ -258,7 +260,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 						}
 					}
 
-					results <- syncResult{repo: repoName, err: nil}
+					results <- syncResult{repo: repoName, action: action, err: nil}
 				}
 			}()
 		}
@@ -276,22 +278,58 @@ func runSync(cmd *cobra.Command, args []string) error {
 		}()
 
 		// Collect results
-		var errCount int
+		var clonedCount, updatedCount, unchangedCount, skippedCount, failedCount int
 		for result := range results {
 			if result.err != nil {
-				errCount++
+				failedCount++
 				fmt.Printf("Error syncing %s: %v\n", result.repo, result.err)
-			} else if verbose {
-				fmt.Printf("Synced %s\n", result.repo)
+			} else {
+				switch result.action {
+				case gsync.ActionCloned:
+					clonedCount++
+					if verbose {
+						fmt.Printf("Cloned %s\n", result.repo)
+					}
+				case gsync.ActionUpdated:
+					updatedCount++
+					if verbose {
+						fmt.Printf("Updated %s\n", result.repo)
+					}
+				case gsync.ActionUnchanged:
+					unchangedCount++
+					if verbose {
+						fmt.Printf("Unchanged %s\n", result.repo)
+					}
+				case gsync.ActionSkipped:
+					skippedCount++
+					if verbose {
+						fmt.Printf("Skipped %s\n", result.repo)
+					}
+				}
 			}
 		}
 
-		if errCount > 0 {
-			fmt.Printf("Completed with %d errors\n", errCount)
+		// Print summary stats as a table
+		total := clonedCount + updatedCount + unchangedCount + skippedCount + failedCount
+		fmt.Printf("\n")
+		fmt.Printf("┌─────────────────────────────────┐\n")
+		fmt.Printf("│ Sync stats for %-16s │\n", inst.Alias)
+		fmt.Printf("├───────────────────┬─────────────┤\n")
+		fmt.Printf("│ Cloned            │ %11d │\n", clonedCount)
+		fmt.Printf("│ Updated           │ %11d │\n", updatedCount)
+		fmt.Printf("│ Unchanged         │ %11d │\n", unchangedCount)
+		if skippedCount > 0 {
+			fmt.Printf("│ Skipped           │ %11d │\n", skippedCount)
 		}
+		if failedCount > 0 {
+			fmt.Printf("│ Failed            │ %11d │\n", failedCount)
+		}
+		fmt.Printf("├───────────────────┼─────────────┤\n")
+		fmt.Printf("│ Total             │ %11d │\n", total)
+		fmt.Printf("└───────────────────┴─────────────┘\n")
 	}
 
-	fmt.Println("Sync complete!")
+	fmt.Println("\nSync complete!")
 	return nil
 }
 
@@ -487,6 +525,42 @@ func runBranch(cmd *cobra.Command, args []string) error {
 	}
 	if err := fetchCmd.Run(); err != nil {
 		return fmt.Errorf("failed to fetch: %w", err)
+	}
+
+	// Ensure current branch is up to date with remote
+	currentBranchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	currentBranchCmd.Dir = cwd
+	currentBranchOutput, err := currentBranchCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+	currentBranch := strings.TrimSpace(string(currentBranchOutput))
+
+	// Check for uncommitted changes
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = cwd
+	statusOutput, err := statusCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get git status: %w", err)
+	}
+
+	if len(statusOutput) == 0 {
+		// Clean working directory, safe to pull
+		fmt.Fprintf(os.Stderr, "Updating current branch '%s'...\n", currentBranch)
+		pullCmd := exec.Command("git", "pull", "--ff-only")
+		pullCmd.Dir = cwd
+		if verbose {
+			pullCmd.Stdout = os.Stdout
+			pullCmd.Stderr = os.Stderr
+		}
+		if err := pullCmd.Run(); err != nil {
+			// Non-fatal: warn but continue (might be on a branch without upstream)
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Warning: could not pull current branch: %v\n", err)
+			}
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "Warning: current branch has uncommitted changes, skipping pull\n")
 	}
 
 	// Check if branch exists locally or remotely

@@ -204,6 +204,61 @@ Sync Flags:
 5. **Cleanup**: Worktrees for deleted remote branches are automatically removed during sync
 6. **Safety**: Repos/worktrees with uncommitted changes are skipped to avoid data loss
 
+## IDE Setup
+
+The tool automatically symlinks `.idea/`, `.vscode/`, `.zed/`, `.venv/`, and `.env` from the main repo to worktrees, so most settings are shared. Below are IDE-specific tips for working with worktrees.
+
+### IntelliJ IDEA / JetBrains IDEs
+
+**Option 1: Open worktrees as separate projects**
+- Open the worktree directory directly (`File > Open`)
+- IntelliJ detects it as a git repo and uses the symlinked settings
+- Each worktree becomes a separate project window
+
+**Option 2: Use built-in worktree support (2023.1+)**
+- Open your main repo
+- Use `Git > Manage Worktrees` to view and switch between worktrees
+
+**Recommended `.gitignore` additions** (to keep per-worktree state separate):
+```
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/shelf/
+```
+
+### VS Code
+
+**Option 1: Open worktrees as separate windows**
+- Open the worktree folder directly (`File > Open Folder`)
+- The symlinked `.vscode/` provides shared settings and extensions config
+
+**Option 2: Multi-root workspace**
+- `File > Add Folder to Workspace` to add multiple worktrees
+- Save as a `.code-workspace` file for easy reopening
+
+**Recommended `.gitignore` additions**:
+```
+.vscode/.history/
+.vscode/*.log
+```
+
+**Tip**: The GitLens extension has excellent worktree support via `GitLens: Git Worktrees` view.
+
+### Zed
+
+Zed works well with worktrees out of the box:
+
+- Open worktree directories directly (`file > open`)
+- Each worktree opens as an independent project
+- Zed auto-detects the git context from the worktree
+
+**Multi-branch workflow**:
+- Use `cmd+shift+o` (Open Recent) to quickly switch between worktree directories
+- Pin frequently-used worktrees for fast access
+
+**Shared settings**: Zed uses `~/.config/zed/settings.json` globally, so no per-project symlinking is needed for editor settings. Project-specific settings in `.zed/` will be symlinked if present.
+
 ## Token Permissions
 
 Your GitHub personal access token needs the following scopes:
