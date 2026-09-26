@@ -8,7 +8,7 @@ A CLI tool to sync all repositories from GitHub instances into the local filesys
 - **Parallel syncing**: Configurable worker pool for fast parallel repository syncing
 - **Git worktrees**: Branches are managed as worktrees, sharing the git object store
 - **Safe updates**: Skips repos with uncommitted changes, uses fast-forward only pulls
-- **Automatic organization**: Repos organized by instance, organization, and branch
+- **Automatic organization**: Repos organized by instance and branch
 
 ## Installation
 
@@ -46,15 +46,19 @@ instances:
   - alias: github
     base_url: https://api.github.com
     token: ghp_your_personal_access_token
-    # Optional: only sync repos from these orgs/owners
-    orgs:
-      - myorg
-      - my-username
+    org: myorg
+
+  # Same token, another org: add a second instance with its own alias
+  - alias: myorg-oss
+    base_url: https://api.github.com
+    token: ghp_your_personal_access_token
+    org: myorg-oss
 
   # GitHub Enterprise
   - alias: work
     base_url: https://github.mycompany.com/api/v3
     token: ghp_your_enterprise_token
+    org: internal
 ```
 
 ### Configuration Options
@@ -66,7 +70,7 @@ instances:
 | `instances[].alias` | Unique name for the GitHub instance |
 | `instances[].base_url` | API base URL (use `https://api.github.com` for GitHub.com) |
 | `instances[].token` | Personal access token with `repo` scope |
-| `instances[].orgs` | Optional list of organizations/owners to sync (case-insensitive). If omitted, all accessible orgs and personal repos are synced. The `--org` flag overrides this filter. |
+| `instances[].org` | Organization to sync (required). Its repos are checked out directly into `<root_dir>/<alias>/`. Use `github-sync list orgs` to see the orgs your token can access. |
 
 ## Directory Structure
 
@@ -75,25 +79,22 @@ Repositories are organized as:
 ```
 <root_dir>/
 └── <instance-alias>/
-    └── <organization>/
-        ├── <repo>/                  # main/master branch
-        ├── <repo>-<branch>/         # other branches (worktrees)
-        └── ...
+    ├── <repo>/                  # main/master branch
+    ├── <repo>-<branch>/         # other branches (worktrees)
+    └── ...
 ```
 
 Example:
 
 ```
 ~/github-repos/
-├── github/
-│   └── myorg/
-│       ├── api-service/
-│       ├── api-service-feature-auth/
-│       └── web-app/
-└── work/
-    └── internal/
-        ├── platform/
-        └── platform-develop/
+├── github/                  # org: myorg
+│   ├── api-service/
+│   ├── api-service-feature-auth/
+│   └── web-app/
+└── work/                    # org: internal
+    ├── platform/
+    └── platform-develop/
 ```
 
 ## Usage
@@ -113,11 +114,8 @@ github-sync sync --branches
 # Sync a specific instance only
 github-sync sync -i github
 
-# Sync a specific organization only
-github-sync sync -o myorg
-
-# Combine filters
-github-sync sync -i work -o platform-team -b -w 15
+# Combine flags
+github-sync sync -i work -b -w 15
 
 # Verbose output
 github-sync sync -v
@@ -128,15 +126,15 @@ github-sync sync -v
 Create a worktree for a specific branch while inside a repository:
 
 ```bash
-cd ~/github-repos/github/myorg/myrepo
+cd ~/github-repos/github/myrepo
 
 # Create worktree for an existing branch
 github-sync branch feature-auth
-# Creates: ~/github-repos/github/myorg/myrepo-feature-auth
+# Creates: ~/github-repos/github/myrepo-feature-auth
 
 # Create worktree for a new branch (auto-creates if it doesn't exist)
 github-sync branch my-new-feature
-# Creates: ~/github-repos/github/myorg/myrepo-my-new-feature
+# Creates: ~/github-repos/github/myrepo-my-new-feature
 
 # Create and cd into the new worktree in one command
 cd $(github-sync branch feature-auth)
@@ -170,8 +168,8 @@ github-sync list orgs -i github
 # List repositories
 github-sync list repos
 
-# List repos for a specific org
-github-sync list repos -o myorg
+# List repos for a specific instance
+github-sync list repos -i work
 ```
 
 ### Command Reference
@@ -191,7 +189,6 @@ Commands:
 Global Flags:
   -c, --config string     Config file (default ~/.github_sync)
   -i, --instance string   Filter to specific GitHub instance
-  -o, --org string        Filter to specific organization
   -v, --verbose           Verbose output
   -h, --help              Help for command
 

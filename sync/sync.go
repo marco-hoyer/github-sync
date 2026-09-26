@@ -80,7 +80,7 @@ func (s *Syncer) runGit(args ...string) error {
 }
 
 func (s *Syncer) SyncRepository(repo github.Repository) (SyncAction, error) {
-	repoPath := filepath.Join(s.rootDir, s.instanceAlias, repo.Owner, repo.Name)
+	repoPath := filepath.Join(s.rootDir, s.instanceAlias, repo.Name)
 	defaultBranch := repo.DefaultBranch
 	if defaultBranch == "" {
 		defaultBranch = "main"
@@ -175,8 +175,8 @@ func (s *Syncer) SyncWorktree(repo github.Repository, branch string) error {
 		return nil
 	}
 
-	mainRepoPath := filepath.Join(s.rootDir, s.instanceAlias, repo.Owner, repo.Name)
-	worktreePath := filepath.Join(s.rootDir, s.instanceAlias, repo.Owner, fmt.Sprintf("%s-%s", repo.Name, sanitizeBranchName(branch)))
+	mainRepoPath := filepath.Join(s.rootDir, s.instanceAlias, repo.Name)
+	worktreePath := filepath.Join(s.rootDir, s.instanceAlias, fmt.Sprintf("%s-%s", repo.Name, sanitizeBranchName(branch)))
 
 	// Check if worktree already exists
 	if _, err := os.Stat(worktreePath); err == nil {
@@ -258,7 +258,7 @@ func (s *Syncer) updateWorktree(worktreePath, branch string) error {
 }
 
 func (s *Syncer) ListWorktrees(repo github.Repository) ([]string, error) {
-	mainRepoPath := filepath.Join(s.rootDir, s.instanceAlias, repo.Owner, repo.Name)
+	mainRepoPath := filepath.Join(s.rootDir, s.instanceAlias, repo.Name)
 
 	cmd := exec.Command("git", "-C", mainRepoPath, "worktree", "list", "--porcelain")
 	output, err := cmd.Output()
@@ -278,8 +278,8 @@ func (s *Syncer) ListWorktrees(repo github.Repository) ([]string, error) {
 }
 
 func (s *Syncer) RemoveWorktree(repo github.Repository, branch string) error {
-	mainRepoPath := filepath.Join(s.rootDir, s.instanceAlias, repo.Owner, repo.Name)
-	worktreePath := filepath.Join(s.rootDir, s.instanceAlias, repo.Owner, fmt.Sprintf("%s-%s", repo.Name, sanitizeBranchName(branch)))
+	mainRepoPath := filepath.Join(s.rootDir, s.instanceAlias, repo.Name)
+	worktreePath := filepath.Join(s.rootDir, s.instanceAlias, fmt.Sprintf("%s-%s", repo.Name, sanitizeBranchName(branch)))
 
 	s.log("Removing worktree %s...", worktreePath)
 
@@ -287,7 +287,7 @@ func (s *Syncer) RemoveWorktree(repo github.Repository, branch string) error {
 }
 
 func (s *Syncer) CleanupStaleWorktrees(repo github.Repository, remoteBranches []string) error {
-	mainRepoPath := filepath.Join(s.rootDir, s.instanceAlias, repo.Owner, repo.Name)
+	mainRepoPath := filepath.Join(s.rootDir, s.instanceAlias, repo.Name)
 
 	// Check if main repo exists
 	if _, err := os.Stat(mainRepoPath); os.IsNotExist(err) {

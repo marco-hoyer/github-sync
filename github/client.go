@@ -73,38 +73,6 @@ func (c *Client) ListOrganizations() ([]string, error) {
 	return allOrgs, nil
 }
 
-func (c *Client) ListUserRepos() ([]Repository, error) {
-	var allRepos []Repository
-	opts := &github.RepositoryListByAuthenticatedUserOptions{
-		ListOptions: github.ListOptions{PerPage: 100},
-	}
-
-	for {
-		repos, resp, err := c.client.Repositories.ListByAuthenticatedUser(c.ctx, opts)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, repo := range repos {
-			allRepos = append(allRepos, Repository{
-				Owner:         repo.GetOwner().GetLogin(),
-				Name:          repo.GetName(),
-				CloneURL:      repo.GetCloneURL(),
-				SSHUrl:        repo.GetSSHURL(),
-				DefaultBranch: repo.GetDefaultBranch(),
-				Archived:      repo.GetArchived(),
-			})
-		}
-
-		if resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
-	}
-
-	return allRepos, nil
-}
-
 func (c *Client) ListOrgRepos(org string) ([]Repository, error) {
 	var allRepos []Repository
 	opts := &github.RepositoryListByOrgOptions{

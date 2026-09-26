@@ -1,25 +1,47 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
-func TestAllowsOrg(t *testing.T) {
-	tests := []struct {
-		name string
-		orgs []string
-		org  string
-		want bool
-	}{
-		{"no filter allows all", nil, "anything", true},
-		{"listed org allowed", []string{"acme", "foo"}, "foo", true},
-		{"match is case-insensitive", []string{"Acme"}, "acme", true},
-		{"unlisted org rejected", []string{"acme"}, "other", false},
+func writeConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			inst := GitHubInstance{Orgs: tt.orgs}
-			if got := inst.AllowsOrg(tt.org); got != tt.want {
-				t.Errorf("AllowsOrg(%q) = %v, want %v", tt.org, got, tt.want)
-			}
-		})
+	return path
+}
+
+func TestLoadReadsOrg(t *testing.T) {
+	path := writeConfig(t, `
+root_dir: /tmp/repos
+instances:
+  - alias: github
+    token: t
+    org: myorg
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Instances[0].Org; got != "myorg" {
+		t.Errorf("Org = %q, want %q", got, "myorg")
+	}
+}
+
+func TestLoadRequiresOrg(t *testing.T) {
+	path := writeConfig(t, `
+root_dir: /tmp/repos
+instances:
+  - alias: github
+    token: t
+`)
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "org is required") {
+		t.Errorf("expected 'org is required' error, got %v", err)
 	}
 }

@@ -21,7 +21,6 @@ var (
 	cfgFile      string
 	verbose      bool
 	instanceArg  string
-	orgArg       string
 	withBranches bool
 	workers      int
 )
@@ -37,7 +36,6 @@ into the local filesystem using git worktrees.`,
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default is ~/.github_sync)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().StringVarP(&instanceArg, "instance", "i", "", "specific GitHub instance alias")
-	rootCmd.PersistentFlags().StringVarP(&orgArg, "org", "o", "", "specific organization to sync")
 
 	syncCmd := &cobra.Command{
 		Use:   "sync",
@@ -141,63 +139,14 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 		syncer := gsync.NewSyncer(cfg.RootDir, inst.Alias, inst.Token, verbose)
 
-		var repos []github.Repository
-
-		if orgArg != "" {
-			repos, err = client.ListOrgRepos(orgArg)
-			if err != nil {
-				return fmt.Errorf("failed to list repos for org %s: %w", orgArg, err)
-			}
-		} else {
-			// Get all orgs the user has access to
-			orgs, err := client.ListOrganizations()
-			if err != nil {
-				fmt.Printf("Warning: could not list organizations: %v\n", err)
-			}
-
-			// Get repos from each org
-			for _, org := range orgs {
-				if !inst.AllowsOrg(org) {
-					if verbose {
-						fmt.Printf("Skipping org not in filter: %s\n", org)
-					}
-					continue
-				}
-				orgRepos, err := client.ListOrgRepos(org)
-				if err != nil {
-					fmt.Printf("Warning: could not list repos for %s: %v\n", org, err)
-					continue
-				}
-				repos = append(repos, orgRepos...)
-			}
-
-			// Also get user repos (personal repos), restricted to the org filter
-			userRepos, err := client.ListUserRepos()
-			if err != nil {
-				fmt.Printf("Warning: could not list user repos: %v\n", err)
-			} else {
-				for _, repo := range userRepos {
-					if inst.AllowsOrg(repo.Owner) {
-						repos = append(repos, repo)
-					}
-				}
-			}
-		}
-
-		// Deduplicate repos by full name
-		seen := make(map[string]bool)
-		var uniqueRepos []github.Repository
-		for _, repo := range repos {
-			key := repo.Owner + "/" + repo.Name
-			if !seen[key] {
-				seen[key] = true
-				uniqueRepos = append(uniqueRepos, repo)
-			}
+		repos, err := client.ListOrgRepos(inst.Org)
+		if err != nil {
+			return fmt.Errorf("failed to list repos for org %s: %w", inst.Org, err)
 		}
 
 		// Filter out archived repos
 		var activeRepos []github.Repository
-		for _, repo := range uniqueRepos {
+		for _, repo := range repos {
 			if repo.Archived {
 				if verbose {
 					fmt.Printf("Skipping archived repo: %s/%s\n", repo.Owner, repo.Name)
@@ -355,7 +304,7 @@ func runListInstances(cmd *cobra.Command, args []string) error {
 		if baseURL == "" {
 			baseURL = "https://api.github.com"
 		}
-		fmt.Printf("  - %s (%s)\n", inst.Alias, baseURL)
+		fmt.Printf("  - %s (%s, org %s)\n", inst.Alias, baseURL, inst.Org)
 	}
 
 	return nil
@@ -392,9 +341,6 @@ func runListOrgs(cmd *cobra.Command, args []string) error {
 		}
 
 		for _, org := range orgs {
-			if !inst.AllowsOrg(org) {
-				continue
-			}
 			fmt.Printf("  - %s\n", org)
 		}
 	}
@@ -420,36 +366,16 @@ func runListRepos(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, inst := range instances {
-		fmt.Printf("\nRepositories for %s:\n", inst.Alias)
+		fmt.Printf("\nRepositories for %s (%s):\n", inst.Alias, inst.Org)
 
 		client, err := github.NewClient(ctx, inst.BaseURL, inst.Token)
 		if err != nil {
 			return err
 		}
 
-		var repos []github.Repository
-
-		if orgArg != "" {
-			repos, err = client.ListOrgRepos(orgArg)
-			if err != nil {
-				return err
-			}
-		} else {
-			orgs, err := client.ListOrganizations()
-			if err != nil {
-				fmt.Printf("Warning: could not list organizations: %v\n", err)
-			}
-
-			for _, org := range orgs {
-				if !inst.AllowsOrg(org) {
-					continue
-				}
-				orgRepos, err := client.ListOrgRepos(org)
-				if err != nil {
-					continue
-				}
-				repos = append(repos, orgRepos...)
-			}
+		repos, err := client.ListOrgRepos(inst.Org)
+		if err != nil {
+			return err
 		}
 
 		for _, repo := range repos {
@@ -485,15 +411,14 @@ instances:
   - alias: github
     base_url: https://api.github.com
     token: ghp_your_personal_access_token_here
-    # Optional: only sync these orgs/owners (default: all accessible)
-    # orgs:
-    #   - my-org
-    #   - my-username
+    # Organization to sync (repos land in <root_dir>/<alias>/<repo>)
+    org: my-org
 
   # GitHub Enterprise (example)
   # - alias: work
   #   base_url: https://github.mycompany.com/api/v3
   #   token: ghp_your_enterprise_token_here
+  #   org: platform
 `
 
 	if err := os.WriteFile(configPath, []byte(exampleConfig), 0600); err != nil {
