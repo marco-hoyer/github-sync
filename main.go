@@ -157,6 +157,12 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 			// Get repos from each org
 			for _, org := range orgs {
+				if !inst.AllowsOrg(org) {
+					if verbose {
+						fmt.Printf("Skipping org not in filter: %s\n", org)
+					}
+					continue
+				}
 				orgRepos, err := client.ListOrgRepos(org)
 				if err != nil {
 					fmt.Printf("Warning: could not list repos for %s: %v\n", org, err)
@@ -165,12 +171,16 @@ func runSync(cmd *cobra.Command, args []string) error {
 				repos = append(repos, orgRepos...)
 			}
 
-			// Also get user repos (personal repos)
+			// Also get user repos (personal repos), restricted to the org filter
 			userRepos, err := client.ListUserRepos()
 			if err != nil {
 				fmt.Printf("Warning: could not list user repos: %v\n", err)
 			} else {
-				repos = append(repos, userRepos...)
+				for _, repo := range userRepos {
+					if inst.AllowsOrg(repo.Owner) {
+						repos = append(repos, repo)
+					}
+				}
 			}
 		}
 
@@ -382,6 +392,9 @@ func runListOrgs(cmd *cobra.Command, args []string) error {
 		}
 
 		for _, org := range orgs {
+			if !inst.AllowsOrg(org) {
+				continue
+			}
 			fmt.Printf("  - %s\n", org)
 		}
 	}
@@ -428,6 +441,9 @@ func runListRepos(cmd *cobra.Command, args []string) error {
 			}
 
 			for _, org := range orgs {
+				if !inst.AllowsOrg(org) {
+					continue
+				}
 				orgRepos, err := client.ListOrgRepos(org)
 				if err != nil {
 					continue
@@ -469,6 +485,10 @@ instances:
   - alias: github
     base_url: https://api.github.com
     token: ghp_your_personal_access_token_here
+    # Optional: only sync these orgs/owners (default: all accessible)
+    # orgs:
+    #   - my-org
+    #   - my-username
 
   # GitHub Enterprise (example)
   # - alias: work

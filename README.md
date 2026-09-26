@@ -46,6 +46,10 @@ instances:
   - alias: github
     base_url: https://api.github.com
     token: ghp_your_personal_access_token
+    # Optional: only sync repos from these orgs/owners
+    orgs:
+      - myorg
+      - my-username
 
   # GitHub Enterprise
   - alias: work
@@ -62,6 +66,7 @@ instances:
 | `instances[].alias` | Unique name for the GitHub instance |
 | `instances[].base_url` | API base URL (use `https://api.github.com` for GitHub.com) |
 | `instances[].token` | Personal access token with `repo` scope |
+| `instances[].orgs` | Optional list of organizations/owners to sync (case-insensitive). If omitted, all accessible orgs and personal repos are synced. The `--org` flag overrides this filter. |
 
 ## Directory Structure
 

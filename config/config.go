@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -12,6 +13,22 @@ type GitHubInstance struct {
 	Alias   string `yaml:"alias"`
 	BaseURL string `yaml:"base_url"`
 	Token   string `yaml:"token"`
+	// Orgs optionally restricts syncing to these organizations/owners.
+	// When empty, all accessible organizations are synced.
+	Orgs []string `yaml:"orgs"`
+}
+
+// AllowsOrg reports whether repos owned by org should be synced for this instance.
+func (i GitHubInstance) AllowsOrg(org string) bool {
+	if len(i.Orgs) == 0 {
+		return true
+	}
+	for _, o := range i.Orgs {
+		if strings.EqualFold(o, org) {
+			return true
+		}
+	}
+	return false
 }
 
 type Config struct {
