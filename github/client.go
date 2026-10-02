@@ -5,8 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/google/go-github/v62/github"
-	"golang.org/x/oauth2"
+	"github.com/google/go-github/v91/github"
 )
 
 type Client struct {
@@ -28,23 +27,20 @@ type Branch struct {
 }
 
 func NewClient(ctx context.Context, baseURL, token string) (*Client, error) {
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	tc := oauth2.NewClient(ctx, ts)
-
-	var client *github.Client
-	var err error
+	opts := []github.ClientOptionsFunc{
+		github.WithAuthToken(token),
+	}
 
 	if baseURL != "" && baseURL != "https://api.github.com" {
-		// GitHub Enterprise
 		if !strings.HasSuffix(baseURL, "/") {
 			baseURL += "/"
 		}
-		client, err = github.NewClient(tc).WithEnterpriseURLs(baseURL, baseURL)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		client = github.NewClient(tc)
+		opts = append(opts, github.WithEnterpriseURLs(baseURL, baseURL))
+	}
+
+	client, err := github.NewClient(opts...)
+	if err != nil {
+		return nil, err
 	}
 
 	return &Client{client: client, ctx: ctx}, nil
