@@ -410,14 +410,17 @@ instances:
   # GitHub.com
   - alias: github
     base_url: https://api.github.com
-    token: ghp_your_personal_access_token_here
+    # Set only one of token, token_env or token_cli.
+    token_cli: gh auth token
+    # token_env: GITHUB_TOKEN
+    # token: ghp_your_personal_access_token_here
     # Organization to sync (repos land in <root_dir>/<alias>/<repo>)
     org: my-org
 
   # GitHub Enterprise (example)
   # - alias: work
   #   base_url: https://github.mycompany.com/api/v3
-  #   token: ghp_your_enterprise_token_here
+  #   token_env: GITHUB_SYNC_ENTERPRISE_TOKEN
   #   org: platform
 `
 
@@ -426,7 +429,7 @@ instances:
 	}
 
 	fmt.Printf("Created example config at %s\n", configPath)
-	fmt.Println("Please edit it with your GitHub token(s).")
+	fmt.Println("Configure token_cli, token_env or token for each instance.")
 	fmt.Println(strings.Repeat("-", 40))
 	fmt.Println(exampleConfig)
 

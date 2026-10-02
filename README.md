@@ -32,7 +32,7 @@ Create a configuration file at `~/.github_sync`:
 github-sync init
 ```
 
-Edit the file with your GitHub tokens:
+Edit the file. Prefer `token_cli` or `token_env` so the token stays out of the config file:
 
 ```yaml
 # Root directory for all synced repositories
@@ -45,32 +45,44 @@ instances:
   # GitHub.com
   - alias: github
     base_url: https://api.github.com
-    token: ghp_your_personal_access_token
+    token_cli: gh auth token
     org: myorg
 
   # Same token, another org: add a second instance with its own alias
   - alias: myorg-oss
     base_url: https://api.github.com
-    token: ghp_your_personal_access_token
+    token: "gh_some_token"
     org: myorg-oss
 
   # GitHub Enterprise
   - alias: work
     base_url: https://github.mycompany.com/api/v3
-    token: ghp_your_enterprise_token
+    token_env: GITHUB_TOKEN
     org: internal
+```
+
+`token_cli` runs without a shell, so pipes, quotes and `$VAR` expansion are not supported. It must print only the token to stdout and finish within 30 seconds. The same command is run only once, even if several instances use it. Examples:
+
+token_cli examples:
+
+```yaml
+token_cli: gh auth token
+token_cli: op read op://Private/GitHub/token
+token_cli: pass github/token
 ```
 
 ### Configuration Options
 
-| Field | Description |
-|-------|-------------|
-| `root_dir` | Base directory for all synced repositories (supports `~`) |
-| `workers` | Number of parallel sync workers (default: 10) |
-| `instances[].alias` | Unique name for the GitHub instance |
-| `instances[].base_url` | API base URL (use `https://api.github.com` for GitHub.com) |
-| `instances[].token` | Personal access token with `repo` scope |
-| `instances[].org` | Organization to sync (required). Its repos are checked out directly into `<root_dir>/<alias>/`. Use `github-sync list orgs` to see the orgs your token can access. |
+| Field                   | Description                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `root_dir`              | Base directory for all synced repositories (supports `~`)                                                                                                          |
+| `workers`               | Number of parallel sync workers (default: 10)                                                                                                                      |
+| `instances[].alias`     | Unique name for the GitHub instance                                                                                                                                |
+| `instances[].base_url`  | API base URL (use `https://api.github.com` for GitHub.com)                                                                                                         |
+| `instances[].token`     | Personal access token with `repo` scope. Use `token_env` instead when possible.                                                                                    |
+| `instances[].token_env` | Name of an environment variable that holds the token.                                                                                                              |
+| `instances[].token_cli` | Command that prints the token to stdout, e.g. `gh auth token`.                                                                                                     |
+| `instances[].org`       | Organization to sync (required). Its repos are checked out directly into `<root_dir>/<alias>/`. Use `github-sync list orgs` to see the orgs your token can access. |
 
 ## Directory Structure
 
@@ -213,15 +225,18 @@ The tool automatically symlinks `.idea/`, `.vscode/`, `.zed/`, `.venv/`, and `.e
 ### IntelliJ IDEA / JetBrains IDEs
 
 **Option 1: Open worktrees as separate projects**
+
 - Open the worktree directory directly (`File > Open`)
 - IntelliJ detects it as a git repo and uses the symlinked settings
 - Each worktree becomes a separate project window
 
 **Option 2: Use built-in worktree support (2023.1+)**
+
 - Open your main repo
 - Use `Git > Manage Worktrees` to view and switch between worktrees
 
 **Recommended `.gitignore` additions** (to keep per-worktree state separate):
+
 ```
 .idea/workspace.xml
 .idea/tasks.xml
@@ -232,14 +247,17 @@ The tool automatically symlinks `.idea/`, `.vscode/`, `.zed/`, `.venv/`, and `.e
 ### VS Code
 
 **Option 1: Open worktrees as separate windows**
+
 - Open the worktree folder directly (`File > Open Folder`)
 - The symlinked `.vscode/` provides shared settings and extensions config
 
 **Option 2: Multi-root workspace**
+
 - `File > Add Folder to Workspace` to add multiple worktrees
 - Save as a `.code-workspace` file for easy reopening
 
 **Recommended `.gitignore` additions**:
+
 ```
 .vscode/.history/
 .vscode/*.log
@@ -256,6 +274,7 @@ Zed works well with worktrees out of the box:
 - Zed auto-detects the git context from the worktree
 
 **Multi-branch workflow**:
+
 - Use `cmd+shift+o` (Open Recent) to quickly switch between worktree directories
 - Pin frequently-used worktrees for fast access
 
